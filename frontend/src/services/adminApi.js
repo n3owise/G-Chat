@@ -1,7 +1,13 @@
 import axios from 'axios';
 
 // Ensure this matches your backend PORT
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+const getApiUrl = () => {
+    const envUrl = import.meta.env.VITE_API_URL;
+    if (!envUrl) return 'http://localhost:5001/api';
+    return envUrl.endsWith('/api') ? envUrl : `${envUrl}/api`;
+};
+
+const API_URL = getApiUrl();
 
 const adminApi = axios.create({
     baseURL: API_URL,
