@@ -11,7 +11,10 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 const corsOptions = {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: [
+        'http://localhost:5173',
+        'https://g-chat-neon.vercel.app'
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization']
