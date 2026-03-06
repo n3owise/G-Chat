@@ -127,7 +127,7 @@ const initDB = async () => {
         console.log('Table "gchat_support_info" ensured.');
 
         // 8. Insert Default Admin if not exists
-        const [admins] = await connection.query('SELECT * FROM gchat_admins WHERE username = "admin"');
+        const [admins] = await connection.query("SELECT * FROM gchat_admins WHERE username = 'admin'");
         if (admins.length === 0) {
             const hashedPassword = await bcrypt.hash('Admin@123', 10);
             await connection.query('INSERT INTO gchat_admins (username, password, email) VALUES (?, ?, ?)',
@@ -136,7 +136,7 @@ const initDB = async () => {
         }
 
         // 9. Insert a test user if not exists (to allow login testing)
-        const [testUsers] = await connection.query('SELECT * FROM users WHERE uid = "TEST001"');
+        const [testUsers] = await connection.query("SELECT * FROM users WHERE uid = 'TEST001'");
         if (testUsers.length === 0) {
             const hashedUserPassword = await bcrypt.hash('User@123', 10);
             await connection.query(`
