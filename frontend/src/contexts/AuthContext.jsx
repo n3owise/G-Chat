@@ -55,22 +55,27 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const login = async (uid, password) => {
+    const login = async (uid, password, emailHint = null) => {
         try {
-            // 1. Resolve UID to Email from profiles table (case-insensitive)
-            const { data: profile, error: profileError } = await supabase
-                .from('profiles')
-                .select('email, id')
-                .ilike('uid', uid.trim())
-                .single();
+            let email = emailHint;
 
-            if (profileError || !profile?.email) {
-                return { success: false, message: 'User ID not found' };
+            // 1. Resolve UID to Email if hint not provided
+            if (!email) {
+                const { data: profile, error: profileError } = await supabase
+                    .from('profiles')
+                    .select('email')
+                    .ilike('uid', uid.trim())
+                    .single();
+
+                if (profileError || !profile?.email) {
+                    return { success: false, message: 'User ID not found' };
+                }
+                email = profile.email;
             }
 
             // 2. Perform Supabase Login with resolved email
             const { data, error } = await supabase.auth.signInWithPassword({
-                email: profile.email,
+                email,
                 password,
             });
 

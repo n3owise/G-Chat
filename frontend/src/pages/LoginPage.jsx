@@ -55,7 +55,7 @@ const LoginPage = () => {
         setLoading(true);
 
         try {
-            const result = await login(uid, password);
+            const result = await login(uid, password, userData?.email);
             if (result.success) {
                 navigate('/chat');
             } else {
