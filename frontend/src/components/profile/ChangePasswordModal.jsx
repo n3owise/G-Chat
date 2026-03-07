@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import api from '../../services/api';
+import { supabase } from '../../config/supabase';
 import Toast from '../common/Toast';
 
 const ChangePasswordModal = ({ onClose }) => {
-    const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
@@ -44,20 +43,19 @@ const ChangePasswordModal = ({ onClose }) => {
         setLoading(true);
 
         try {
-            const response = await api.put('/users/change-password', {
-                currentPassword,
-                newPassword
+            const { error } = await supabase.auth.updateUser({
+                password: newPassword
             });
 
-            if (response.data.success) {
-                showToast('Password changed successfully');
-                setTimeout(() => {
-                    onClose();
-                }, 1500);
-            }
+            if (error) throw error;
+
+            showToast('Password changed successfully');
+            setTimeout(() => {
+                onClose();
+            }, 1500);
         } catch (err) {
-            console.error('Change password error:', err);
-            showToast(err.response?.data?.message || 'Failed to change password', 'error');
+            console.error('Change password error:', err.message);
+            showToast(err.message || 'Failed to change password', 'error');
         } finally {
             setLoading(false);
         }
@@ -85,21 +83,6 @@ const ChangePasswordModal = ({ onClose }) => {
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6">
                     <form onSubmit={handleSubmit} className="space-y-4">
-                        {/* Current Password */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Current Password
-                            </label>
-                            <input
-                                type="password"
-                                value={currentPassword}
-                                onChange={(e) => setCurrentPassword(e.target.value)}
-                                placeholder="Enter current password"
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                                required
-                            />
-                        </div>
-
                         {/* New Password */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -153,7 +136,7 @@ const ChangePasswordModal = ({ onClose }) => {
                         <div className="pt-4">
                             <button
                                 type="submit"
-                                disabled={loading || !currentPassword || !newPassword || !confirmPassword || newPassword !== confirmPassword}
+                                disabled={loading || !newPassword || !confirmPassword || newPassword !== confirmPassword || !validation.minLength || !validation.hasNumber || !validation.hasSpecial}
                                 className="w-full bg-primary text-white py-3 rounded-lg font-semibold hover:bg-primary/90 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
                             >
                                 {loading ? 'Changing Password...' : 'Change Password'}

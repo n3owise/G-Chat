@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../../services/api';
+import { supabase } from '../../config/supabase';
 import Avatar from '../common/Avatar';
 import Loader from '../common/Loader';
 import EmptyState from '../common/EmptyState';
 import { useSocket } from '../../contexts/SocketContext';
+import { useAuth } from '../../hooks/useAuth';
 
 const formatTimestamp = (ts) => {
     if (!ts) return '';
@@ -21,27 +22,89 @@ const formatTimestamp = (ts) => {
 
 const ChatList = ({ onChatClick }) => {
     const navigate = useNavigate();
-    const { socket } = useSocket();
+    const { user } = useAuth();
+    const { messages: realtimeMessages } = useSocket();
     const [chats, setChats] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const fetchChats = useCallback(async () => {
+        if (!user) return;
         try {
-            const res = await api.get('/messages/conversations');
-            if (res.data.success) setChats(res.data.chats);
-        } catch (e) { console.error(e); }
-        finally { setLoading(false); }
-    }, []);
+            // 1. Fetch all messages involving the user
+            const { data: allMessages, error } = await supabase
+                .from('messages')
+                .select('*, profiles!messages_sender_id_fkey(*)')
+                .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            // 2. Aggregate into conversations
+            const conversationMap = new Map();
+
+            for (const msg of allMessages) {
+                const otherPartyId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+
+                if (!conversationMap.has(otherPartyId)) {
+                    // First time seeing this conversation (it's the latest due to DESC order)
+                    // We need to fetch the profile of the other party
+                    // In a bigger app, we'd join, but for now we'll fetch once or use the join above if RLS allows
+
+                    // Note: 'profiles!messages_sender_id_fkey(*)' is a join, but we need the OTHER party.
+                    // This is tricky in a single query. Let's do a secondary fetch for unique IDs.
+                    conversationMap.set(otherPartyId, {
+                        lastMessage: {
+                            text: msg.content,
+                            timestamp: msg.created_at,
+                            isSentByMe: msg.sender_id === user.id
+                        },
+                        unreadCount: msg.receiver_id === user.id && !msg.is_read ? 1 : 0,
+                        otherPartyId
+                    });
+                } else if (msg.receiver_id === user.id && !msg.is_read) {
+                    const conv = conversationMap.get(otherPartyId);
+                    conv.unreadCount++;
+                }
+            }
+
+            const uniqueIds = Array.from(conversationMap.keys());
+            if (uniqueIds.length > 0) {
+                const { data: profiles, error: pError } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .in('id', uniqueIds);
+
+                if (pError) throw pError;
+
+                const finalChats = uniqueIds.map(id => {
+                    const p = profiles.find(x => x.id === id);
+                    const conv = conversationMap.get(id);
+                    return {
+                        user: p || { id, name: 'Unknown User', uid: 'UNKNOWN' },
+                        lastMessage: conv.lastMessage,
+                        unreadCount: conv.unreadCount
+                    };
+                });
+                setChats(finalChats);
+            } else {
+                setChats([]);
+            }
+
+        } catch (e) {
+            console.error('Fetch chats error:', e.message);
+        } finally {
+            setLoading(false);
+        }
+    }, [user]);
 
     useEffect(() => { fetchChats(); }, [fetchChats]);
 
     useEffect(() => {
-        if (!socket) return;
-        const refresh = () => fetchChats();
-        socket.on('receive_message', refresh);
-        socket.on('message_sent', refresh);
-        return () => { socket.off('receive_message', refresh); socket.off('message_sent', refresh); };
-    }, [socket, fetchChats]);
+        // Refresh when new messages arrive
+        if (realtimeMessages.length > 0) {
+            fetchChats();
+        }
+    }, [realtimeMessages, fetchChats]);
 
     if (loading) return <Loader text="Loading chats..." />;
 

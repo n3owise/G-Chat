@@ -1,68 +1,115 @@
 import { createContext, useState, useEffect } from 'react';
-import api from '../services/api';
+import { supabase } from '../config/supabase';
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [token, setToken] = useState(localStorage.getItem('gchat_token'));
 
-    // Check if user is logged in on mount
+    // Sync auth state on mount and on changes
     useEffect(() => {
-        if (token) {
-            getCurrentUser();
+        // 1. Initial check
+        checkUser();
+
+        // 2. Listen for auth changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+            if (session?.user) {
+                await syncUserProfile(session.user);
+            } else {
+                setUser(null);
+                setLoading(false);
+            }
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    const checkUser = async () => {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+            await syncUserProfile(authUser);
         } else {
             setLoading(false);
         }
-    }, [token]);
+    };
 
-    const getCurrentUser = async () => {
+    const syncUserProfile = async (authUser) => {
         try {
-            const response = await api.get('/auth/me');
-            if (response.data.success) {
-                setUser(response.data.user);
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', authUser.id)
+                .single();
+
+            if (data) {
+                // Combine auth user and profile data
+                setUser({ ...authUser, ...data });
+            } else if (error) {
+                console.error('Error fetching profile:', error.message);
             }
-        } catch (error) {
-            console.error('Get current user error:', error);
-            logout();
+        } catch (err) {
+            console.error('Profile sync error:', err);
         } finally {
             setLoading(false);
         }
     };
 
     const login = async (uid, password) => {
-        const response = await api.post('/auth/login', { uid, password });
-        if (response.data.success) {
-            localStorage.setItem('gchat_token', response.data.token);
-            setToken(response.data.token);
-            setUser(response.data.user);
+        try {
+            // 1. Resolve UID to Email from profiles table
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('email')
+                .eq('uid', uid.trim())
+                .single();
+
+            if (profileError || !profile?.email) {
+                return { success: false, message: 'User ID not found' };
+            }
+
+            // 2. Perform Supabase Login with resolved email
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: profile.email,
+                password,
+            });
+
+            if (error) return { success: false, message: error.message };
             return { success: true };
+        } catch (err) {
+            return { success: false, message: 'An unexpected error occurred' };
         }
-        return { success: false, message: response.data.message };
     };
 
-    const signup = async (uid, password) => {
-        const response = await api.post('/auth/signup', { uid, password });
-        if (response.data.success) {
-            localStorage.setItem('gchat_token', response.data.token);
-            setToken(response.data.token);
-            setUser(response.data.user);
-            return { success: true };
-        }
-        return { success: false, message: response.data.message };
+    const signup = async (uid, password, name) => {
+        const email = `${uid}@gchat.com`;
+
+        const { data, error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+                data: { name, uid }
+            }
+        });
+
+        if (error) return { success: false, message: error.message };
+
+        // Profile is automatically created by the trigger if we set it up,
+        // otherwise we manually insert it here.
+        const { error: profileError } = await supabase
+            .from('profiles')
+            .insert([
+                { id: data.user.id, uid, name, email }
+            ]);
+
+        if (profileError) console.error('Profile creation error:', profileError.message);
+
+        return { success: true };
     };
 
     const logout = async () => {
-        try {
-            await api.post('/auth/logout');
-        } catch (error) {
-            console.error('Logout error:', error);
-        } finally {
-            localStorage.removeItem('gchat_token');
-            setToken(null);
-            setUser(null);
-        }
+        await supabase.auth.signOut();
+        setUser(null);
     };
 
     const value = {

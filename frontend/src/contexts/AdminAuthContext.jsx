@@ -1,5 +1,5 @@
 import { createContext, useState, useEffect, useContext } from 'react';
-import adminApi from '../services/adminApi';
+import { supabase } from '../config/supabase';
 
 const AdminAuthContext = createContext();
 
@@ -18,30 +18,43 @@ export const AdminAuthProvider = ({ children }) => {
 
     useEffect(() => {
         if (token) {
-            // In a real app we might verify the token via /api/admin/me
-            // But based on the prompt we're using a simplified approach
-            setAdmin({ username: 'admin' });
+            try {
+                const adminData = JSON.parse(localStorage.getItem('gchat_admin_user'));
+                setAdmin(adminData || { username: 'admin' });
+            } catch (e) {
+                setAdmin({ username: 'admin' });
+            }
         }
         setLoading(false);
     }, [token]);
 
     const login = async (username, password, rememberMe) => {
         try {
-            const response = await adminApi.post('/admin/login', { username, password, rememberMe });
-            if (response.data.success) {
-                localStorage.setItem('gchat_admin_token', response.data.token);
-                setToken(response.data.token);
-                setAdmin(response.data.admin);
-                return { success: true };
+            const { data, error } = await supabase
+                .from('gchat_admins')
+                .select('*')
+                .eq('username', username)
+                .eq('password', password)
+                .single();
+
+            if (error || !data) {
+                return { success: false, message: 'Invalid credentials' };
             }
-            return { success: false, message: response.data.message };
+
+            const fakeToken = `admin_${Date.now()}`;
+            localStorage.setItem('gchat_admin_token', fakeToken);
+            localStorage.setItem('gchat_admin_user', JSON.stringify(data));
+            setToken(fakeToken);
+            setAdmin(data);
+            return { success: true };
         } catch (error) {
-            return { success: false, message: error.response?.data?.message || 'Login failed' };
+            return { success: false, message: error.message || 'Login failed' };
         }
     };
 
     const logout = () => {
         localStorage.removeItem('gchat_admin_token');
+        localStorage.removeItem('gchat_admin_user');
         setToken(null);
         setAdmin(null);
     };

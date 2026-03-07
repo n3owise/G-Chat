@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import adminApi from '../../services/adminApi';
+import { supabase } from '../../config/supabase';
 import { useAdminAuth } from '../../contexts/AdminAuthContext';
 import Toast from '../../components/common/Toast';
 
@@ -20,12 +20,14 @@ const AdminMessages = () => {
 
     const fetchUsers = async () => {
         try {
-            const response = await adminApi.get('/admin/users?limit=10000');
-            if (response.data.success) {
-                setUsers(response.data.users);
-            }
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('uid, name')
+                .order('name');
+            if (error) throw error;
+            setUsers(data || []);
         } catch (err) {
-            console.error(err);
+            console.error('Fetch users error:', err.message);
         }
     };
 
@@ -42,15 +44,27 @@ const AdminMessages = () => {
 
         setLoading(true);
         try {
-            const response = await adminApi.get(`/admin/messages/${user1}/${user2}`);
-            if (response.data.success) {
-                setMessages(response.data.messages);
-                if (response.data.messages.length === 0) {
-                    showToast('No messages found between these users');
-                }
+            // Fetch messages between user1 and user2
+            const { data, error } = await supabase
+                .from('messages')
+                .select('*, profiles!messages_sender_id_fkey(name, uid)')
+                .or(`and(sender_id.eq.${user1},receiver_id.eq.${user2}),and(sender_id.eq.${user2},receiver_id.eq.${user1})`)
+                .order('created_at', { ascending: true });
+
+            if (error) throw error;
+
+            // Map profiles to sender_name for compatibility with existing JSX
+            const mapped = data.map(m => ({
+                ...m,
+                sender_name: m.profiles?.name || 'Unknown'
+            }));
+
+            setMessages(mapped);
+            if (mapped.length === 0) {
+                showToast('No messages found');
             }
         } catch (err) {
-            console.error(err);
+            console.error('Fetch conversation error:', err.message);
             showToast('Failed to load messages', 'error');
         } finally {
             setLoading(false);
@@ -63,13 +77,16 @@ const AdminMessages = () => {
         }
 
         try {
-            const response = await adminApi.delete(`/admin/messages/${messageId}`);
-            if (response.data.success) {
-                showToast('Message deleted successfully');
-                setMessages(messages.filter(m => m.id !== messageId));
-            }
+            const { error } = await supabase
+                .from('messages')
+                .delete()
+                .eq('id', messageId);
+
+            if (error) throw error;
+            showToast('Message deleted successfully');
+            setMessages(messages.filter(m => m.id !== messageId));
         } catch (err) {
-            console.error(err);
+            console.error('Delete error:', err.message);
             showToast('Failed to delete message', 'error');
         }
     };

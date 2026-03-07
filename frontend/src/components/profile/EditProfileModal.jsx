@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import api from '../../services/api';
+import { supabase } from '../../config/supabase';
 import Toast from '../common/Toast';
 import Avatar from '../common/Avatar';
 
@@ -17,22 +17,28 @@ const EditProfileModal = ({ user, onClose, onUpdate }) => {
         setSaving(true);
 
         try {
-            const response = await api.put('/users/profile', {
-                name: name.trim(),
-                email: email.trim(),
-                phone: phone.trim()
-            });
+            const { data, error } = await supabase
+                .from('profiles')
+                .update({
+                    name: name.trim(),
+                    email: email.trim(),
+                    phone: phone.trim(),
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', user.id)
+                .select()
+                .single();
 
-            if (response.data.success) {
-                showToast('Profile updated successfully');
-                setTimeout(() => {
-                    onUpdate(response.data.user);
-                    onClose();
-                }, 1000);
-            }
+            if (error) throw error;
+
+            showToast('Profile updated successfully');
+            setTimeout(() => {
+                onUpdate(data);
+                onClose();
+            }, 1000);
         } catch (err) {
-            console.error('Update profile error:', err);
-            showToast(err.response?.data?.message || 'Failed to update profile', 'error');
+            console.error('Update profile error:', err.message);
+            showToast('Failed to update profile', 'error');
         } finally {
             setSaving(false);
         }
@@ -56,26 +62,39 @@ const EditProfileModal = ({ user, onClose, onUpdate }) => {
         }
 
         setUploadingImage(true);
-        setUploadProgress(0);
+        setUploadProgress(10); // Start progress
 
         try {
-            const formData = new FormData();
-            formData.append('profilePicture', file);
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${user.id}-${Math.random()}.${fileExt}`;
+            const filePath = `${fileName}`;
 
-            const response = await api.post('/users/upload-profile-picture', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-                onUploadProgress: (progressEvent) => {
-                    const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-                    setUploadProgress(percentCompleted);
-                }
-            });
+            // 1. Upload to Supabase Storage
+            const { error: uploadError } = await supabase.storage
+                .from('avatars')
+                .upload(filePath, file);
 
-            if (response.data.success) {
-                showToast('Profile picture updated');
-                onUpdate({ ...user, profile_image: response.data.profileImage });
-            }
+            if (uploadError) throw uploadError;
+            setUploadProgress(70);
+
+            // 2. Get Public URL
+            const { data: { publicUrl } } = supabase.storage
+                .from('avatars')
+                .getPublicUrl(filePath);
+
+            // 3. Update Profile Table
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update({ profile_image: publicUrl })
+                .eq('id', user.id);
+
+            if (updateError) throw updateError;
+            setUploadProgress(100);
+
+            showToast('Profile picture updated');
+            onUpdate({ ...user, profile_image: publicUrl });
         } catch (err) {
-            console.error('Upload error:', err);
+            console.error('Upload error:', err.message);
             showToast('Failed to upload image', 'error');
         } finally {
             setUploadingImage(false);

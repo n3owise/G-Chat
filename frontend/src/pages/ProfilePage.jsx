@@ -8,12 +8,17 @@ import ChangePasswordModal from '../components/profile/ChangePasswordModal';
 
 const ProfilePage = () => {
     const navigate = useNavigate();
-    const { user, setUser } = useAuth();
+    const { user, setUser, logout } = useAuth();
     const [showEditModal, setShowEditModal] = useState(false);
     const [showPasswordModal, setShowPasswordModal] = useState(false);
 
     const handleUpdateProfile = (updatedUser) => {
         setUser(updatedUser);
+    };
+
+    const handleLogout = () => {
+        logout();
+        navigate('/login');
     };
 
     return (
@@ -89,11 +94,7 @@ const ProfilePage = () => {
                     </button>
 
                     <button
-                        onClick={() => {
-                            // we need logout functionality, user context provides it
-                            const { logout } = useAuth(); // getting logout function 
-                            logout();
-                        }}
+                        onClick={handleLogout}
                         className="w-full bg-red-50 text-red-600 border border-red-100 py-3 rounded-lg font-semibold hover:bg-red-100 transition"
                     >
                         Logout

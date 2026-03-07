@@ -137,7 +137,7 @@ const Message = ({ message, isMine, showAvatar, otherUser, onLongPress, onImageC
         // Default: text
         return (
             <>
-                <p className="whitespace-pre-wrap break-words leading-snug text-sm">{message.message_text}</p>
+                <p className="whitespace-pre-wrap break-words leading-snug text-sm">{message.content}</p>
                 <MsgFooter time={time} msg={message} isMine={isMine} />
             </>
         );

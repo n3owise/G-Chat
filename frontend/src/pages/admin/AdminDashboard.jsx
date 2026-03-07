@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import adminApi from '../../services/adminApi';
+import { supabase } from '../../config/supabase';
 import { useAdminAuth } from '../../contexts/AdminAuthContext';
 
 const AdminDashboard = () => {
@@ -11,31 +11,103 @@ const AdminDashboard = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetchStats();
-        fetchMessageStats();
+        const loadAll = async () => {
+            setLoading(true);
+            await Promise.all([fetchStats(), fetchMessageStats()]);
+            setLoading(false);
+        };
+        loadAll();
     }, []);
 
     const fetchStats = async () => {
         try {
-            const response = await adminApi.get('/admin/dashboard');
-            if (response.data.success) {
-                setStats(response.data.stats);
-            }
+            // 1. Total Users
+            const { count: totalUsers } = await supabase
+                .from('profiles')
+                .select('*', { count: 'exact', head: true });
+
+            // 2. Online Users (Active)
+            const { count: activeUsers } = await supabase
+                .from('profiles')
+                .select('*', { count: 'exact', head: true })
+                .eq('is_online', true);
+
+            // 3. Total Messages
+            const { count: totalMessages } = await supabase
+                .from('messages')
+                .select('*', { count: 'exact', head: true });
+
+            // 4. Recent Users
+            const { data: recentUsers } = await supabase
+                .from('profiles')
+                .select('*')
+                .order('gchat_registered_at', { ascending: false })
+                .limit(5);
+
+            // 5. New Users Today
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const { count: newUsersToday } = await supabase
+                .from('profiles')
+                .select('*', { count: 'exact', head: true })
+                .gte('gchat_registered_at', today.toISOString());
+
+            // 6. Messages Today
+            const { count: messagesToday } = await supabase
+                .from('messages')
+                .select('*', { count: 'exact', head: true })
+                .gte('created_at', today.toISOString());
+
+            setStats({
+                totalUsers: totalUsers || 0,
+                activeUsers: activeUsers || 0,
+                totalMessages: totalMessages || 0,
+                newUsersToday: newUsersToday || 0,
+                messagesToday: messagesToday || 0,
+                recentUsers: recentUsers || []
+            });
+
         } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
+            console.error('Stats error:', err.message);
         }
     };
 
     const fetchMessageStats = async () => {
         try {
-            const response = await adminApi.get('/admin/message-stats');
-            if (response.data.success) {
-                setMessageStats(response.data.stats);
-            }
+            // For complex stats like breakdown and active users, 
+            // since we're on the client, we'll fetch a sample of recent messages and aggregate.
+            const { data: recentMsgs } = await supabase
+                .from('messages')
+                .select('message_type, sender_id, profiles!messages_sender_id_fkey(name, uid)')
+                .limit(1000);
+
+            if (!recentMsgs) return;
+
+            const typeMap = {};
+            const userMap = {};
+
+            recentMsgs.forEach(m => {
+                // Type breakdown
+                typeMap[m.message_type] = (typeMap[m.message_type] || 0) + 1;
+
+                // Active users
+                const uid = m.profiles?.uid || m.sender_id;
+                if (!userMap[uid]) {
+                    userMap[uid] = { uid, name: m.profiles?.name || 'Unknown', count: 0 };
+                }
+                userMap[uid].count++;
+            });
+
+            const typeBreakdown = Object.entries(typeMap).map(([type, count]) => ({ message_type: type, count }));
+            const activeUsers = Object.values(userMap).sort((a, b) => b.count - a.count).slice(0, 10);
+
+            setMessageStats({
+                typeBreakdown,
+                activeUsers: activeUsers.map(u => ({ ...u, message_count: u.count }))
+            });
+
         } catch (err) {
-            console.error(err);
+            console.error('Message stats error:', err.message);
         }
     };
 

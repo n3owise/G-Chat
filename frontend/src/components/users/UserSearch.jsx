@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import api from '../../services/api';
+import { supabase } from '../../config/supabase';
 import Avatar from '../common/Avatar';
 import Loader from '../common/Loader';
 import UserProfileModal from '../profile/UserProfileModal';
@@ -19,12 +19,15 @@ const UserSearch = ({ onUserClick }) => {
     const fetchAllUsers = async () => {
         setLoading(true);
         try {
-            const response = await api.get('/users/all?limit=100');
-            if (response.data.success) {
-                setAllUsers(response.data.users);
-            }
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .limit(100);
+
+            if (error) throw error;
+            setAllUsers(data || []);
         } catch (err) {
-            console.error(err);
+            console.error('Error fetching users:', err.message);
         } finally {
             setLoading(false);
         }
@@ -38,13 +41,17 @@ const UserSearch = ({ onUserClick }) => {
 
         setLoading(true);
         try {
-            const response = await api.get(`/users/search?q=${encodeURIComponent(searchTerm.trim())}`);
-            if (response.data.success) {
-                setUsers(response.data.users);
-                setShowingSearchResults(true);
-            }
+            const query = searchTerm.trim();
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .or(`name.ilike.%${query}%,uid.ilike.%${query}%`);
+
+            if (error) throw error;
+            setUsers(data || []);
+            setShowingSearchResults(true);
         } catch (err) {
-            console.error(err);
+            console.error('Search error:', err.message);
         } finally {
             setLoading(false);
         }

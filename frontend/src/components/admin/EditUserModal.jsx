@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import adminApi from '../../services/adminApi';
+import { supabase } from '../../config/supabase';
 
 const EditUserModal = ({ user, onClose, onUpdate, showToast }) => {
     const [name, setName] = useState(user.name || '');
@@ -12,19 +12,22 @@ const EditUserModal = ({ user, onClose, onUpdate, showToast }) => {
         setSaving(true);
 
         try {
-            const response = await adminApi.put(`/admin/users/${user.uid}`, {
-                name: name.trim(),
-                email: email.trim(),
-                phone: phone.trim()
-            });
+            const { error } = await supabase
+                .from('profiles')
+                .update({
+                    name: name.trim(),
+                    email: email.trim(),
+                    phone: phone.trim()
+                })
+                .eq('uid', user.uid);
 
-            if (response.data.success) {
-                showToast('User updated successfully');
-                onUpdate();
-            }
+            if (error) throw error;
+
+            showToast('User updated successfully');
+            onUpdate();
         } catch (err) {
-            console.error(err);
-            showToast(err.response?.data?.message || 'Failed to update user', 'error');
+            console.error('Update error:', err.message);
+            showToast(err.message || 'Failed to update user', 'error');
         } finally {
             setSaving(false);
         }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import adminApi from '../../services/adminApi';
+import { supabase } from '../../config/supabase';
 import { useAdminAuth } from '../../contexts/AdminAuthContext';
 import UserDetailsModal from '../../components/admin/UserDetailsModal';
 import EditUserModal from '../../components/admin/EditUserModal';
@@ -24,9 +24,11 @@ const AdminUsers = () => {
     const [showAddUserModal, setShowAddUserModal] = useState(false);
     const [toast, setToast] = useState(null);
 
+    const ITEMS_PER_PAGE = 50;
+
     useEffect(() => {
         fetchUsers();
-    }, [currentPage, searchTerm, statusFilter]);
+    }, [currentPage, statusFilter]);
 
     // Debounce search
     useEffect(() => {
@@ -44,21 +46,35 @@ const AdminUsers = () => {
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            const response = await adminApi.get('/admin/users', {
-                params: {
-                    page: currentPage,
-                    limit: 50,
-                    search: searchTerm,
-                    status: statusFilter
-                }
-            });
+            let query = supabase
+                .from('profiles')
+                .select('*', { count: 'exact' });
 
-            if (response.data.success) {
-                setUsers(response.data.users);
-                setTotalPages(response.data.pagination.pages);
+            // 1. Search
+            if (searchTerm) {
+                query = query.or(`uid.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`);
             }
+
+            // 2. Status Filter
+            if (statusFilter === 'active') {
+                query = query.eq('gchat_status', 'active');
+            } else if (statusFilter === 'banned') {
+                query = query.eq('gchat_status', 'banned');
+            }
+
+            // 3. Pagination
+            const from = (currentPage - 1) * ITEMS_PER_PAGE;
+            const to = from + ITEMS_PER_PAGE - 1;
+            query = query.range(from, to).order('gchat_registered_at', { ascending: false });
+
+            const { data, count, error } = await query;
+
+            if (error) throw error;
+
+            setUsers(data || []);
+            setTotalPages(Math.ceil((count || 0) / ITEMS_PER_PAGE) || 1);
         } catch (err) {
-            console.error(err);
+            console.error('Fetch users error:', err.message);
             showToast('Failed to load users', 'error');
         } finally {
             setLoading(false);
@@ -67,13 +83,17 @@ const AdminUsers = () => {
 
     const handleViewUser = async (uid) => {
         try {
-            const response = await adminApi.get(`/admin/users/${uid}`);
-            if (response.data.success) {
-                setSelectedUser(response.data.user);
-                setShowDetailsModal(true);
-            }
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('uid', uid)
+                .single();
+
+            if (error) throw error;
+            setSelectedUser(data);
+            setShowDetailsModal(true);
         } catch (err) {
-            console.error(err);
+            console.error('View user error:', err.message);
             showToast('Failed to load user details', 'error');
         }
     };
@@ -90,6 +110,7 @@ const AdminUsers = () => {
 
     const handleBanToggle = async (user) => {
         const action = user.gchat_status === 'banned' ? 'unban' : 'ban';
+        const newStatus = action === 'ban' ? 'banned' : 'active';
         const confirmMsg = action === 'ban'
             ? `Are you sure you want to ban ${user.name}? They will not be able to login.`
             : `Are you sure you want to unban ${user.name}? They will be able to login again.`;
@@ -97,13 +118,16 @@ const AdminUsers = () => {
         if (!window.confirm(confirmMsg)) return;
 
         try {
-            const response = await adminApi.put(`/admin/users/${user.uid}/ban`, { action });
-            if (response.data.success) {
-                showToast(`User ${action === 'ban' ? 'banned' : 'unbanned'} successfully`);
-                fetchUsers();
-            }
+            const { error } = await supabase
+                .from('profiles')
+                .update({ gchat_status: newStatus })
+                .eq('uid', user.uid);
+
+            if (error) throw error;
+            showToast(`User ${action === 'ban' ? 'banned' : 'unbanned'} successfully`);
+            fetchUsers();
         } catch (err) {
-            console.error(err);
+            console.error('Ban error:', err.message);
             showToast(`Failed to ${action} user`, 'error');
         }
     };

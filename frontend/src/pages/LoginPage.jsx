@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import api from '../services/api';
+import { supabase } from '../config/supabase';
 
 const LoginPage = () => {
     const navigate = useNavigate();
@@ -20,20 +20,30 @@ const LoginPage = () => {
         setLoading(true);
 
         try {
-            const response = await api.post('/auth/check-uid', { uid: uid.trim() });
+            // Check if user exists in profiles table
+            const { data, error: fetchError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('uid', uid.trim())
+                .single();
 
-            if (response.data.success) {
-                if (response.data.firstTimeUser) {
-                    // First-time user, go to signup
-                    setUserData(response.data.userData);
-                    setStep(3);
-                } else {
-                    // Existing user, go to password
-                    setStep(2);
-                }
+            if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows found"
+                throw fetchError;
+            }
+
+            if (data) {
+                // Existing user, go to password
+                setUserData(data);
+                setStep(2);
+            } else {
+                // User doesn't exist in our profiles yet
+                // For G-Chat, we might want to check the external GSAA database
+                // But for this standalone migration, we'll allow them to signup
+                setStep(3);
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Invalid User ID');
+            console.error('UID check error:', err);
+            setError('Error checking User ID. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -52,7 +62,7 @@ const LoginPage = () => {
                 setError(result.message || 'Login failed');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Incorrect password');
+            setError('Incorrect password or login error');
         } finally {
             setLoading(false);
         }

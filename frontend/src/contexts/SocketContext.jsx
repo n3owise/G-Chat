@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { io } from 'socket.io-client';
+import { supabase } from '../config/supabase';
 import { useAuth } from '../hooks/useAuth';
 
 const SocketContext = createContext();
@@ -11,63 +11,67 @@ export const useSocket = () => {
 };
 
 export const SocketProvider = ({ children }) => {
-    const [socket, setSocket] = useState(null);
     const [isConnected, setIsConnected] = useState(false);
-    const offlineQueueRef = useRef([]); // messages queued while offline
     const { user, isAuthenticated } = useAuth();
-    const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5001';
+    const [messages, setMessages] = useState([]); // Buffer for real-time messages
 
     useEffect(() => {
         if (!isAuthenticated || !user) return;
 
-        const token = localStorage.getItem('gchat_token');
-        const newSocket = io(SOCKET_URL, {
-            auth: { token },
-            reconnectionDelay: 1000,
-            reconnectionAttempts: 10,
-        });
-
-        newSocket.on('connect', () => {
-            setIsConnected(true);
-            // Flush offline queue
-            const queue = offlineQueueRef.current;
-            if (queue.length) {
-                queue.forEach(msg => newSocket.emit('send_message', msg));
-                offlineQueueRef.current = [];
-            }
-        });
-
-        newSocket.on('disconnect', () => setIsConnected(false));
-
-        newSocket.on('connect_error', (err) => {
-            console.warn('[Socket] connect_error:', err.message);
-            setIsConnected(false);
-        });
-
-        setSocket(newSocket);
+        // 1. Subscribe to real-time messages
+        const channel = supabase
+            .channel('public:messages')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'messages',
+                    filter: `receiver_id=eq.${user.id}`
+                },
+                (payload) => {
+                    console.log('Real-time message received:', payload.new);
+                    setMessages(prev => [...prev, payload.new]);
+                }
+            )
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    setIsConnected(true);
+                } else {
+                    setIsConnected(false);
+                }
+            });
 
         return () => {
-            newSocket.close();
-            setSocket(null);
+            supabase.removeChannel(channel);
             setIsConnected(false);
         };
     }, [isAuthenticated, user]);
 
-    // Send via socket or queue if offline
-    const sendMessage = (data) => {
-        if (socket && isConnected) {
-            socket.emit('send_message', data);
-        } else {
-            // Store in localStorage queue for persistence
-            const stored = JSON.parse(localStorage.getItem('gchat_offline_queue') || '[]');
-            stored.push(data);
-            localStorage.setItem('gchat_offline_queue', JSON.stringify(stored));
-            offlineQueueRef.current.push(data);
+    // Send via Supabase Client (Inserts into DB, triggers Realtime for receiver)
+    const sendMessage = async (data) => {
+        const { receiver_id, content, message_type = 'text' } = data;
+
+        const { error } = await supabase
+            .from('messages')
+            .insert([
+                {
+                    sender_id: user.id,
+                    receiver_id,
+                    content,
+                    message_type
+                }
+            ]);
+
+        if (error) {
+            console.error('Error sending message:', error.message);
+            return { success: false, error: error.message };
         }
+        return { success: true };
     };
 
     return (
-        <SocketContext.Provider value={{ socket, isConnected, sendMessage }}>
+        <SocketContext.Provider value={{ isConnected, sendMessage, messages }}>
             {children}
         </SocketContext.Provider>
     );
