@@ -20,11 +20,11 @@ const LoginPage = () => {
         setLoading(true);
 
         try {
-            // Check if user exists in profiles table
+            // Check if user exists in profiles table (case-insensitive)
             const { data, error: fetchError } = await supabase
                 .from('profiles')
                 .select('*')
-                .eq('uid', uid.trim())
+                .ilike('uid', uid.trim())
                 .single();
 
             if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows found"

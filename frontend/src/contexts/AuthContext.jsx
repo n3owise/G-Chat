@@ -82,29 +82,48 @@ export const AuthProvider = ({ children }) => {
     };
 
     const signup = async (uid, password, name) => {
-        const email = `${uid}@gchat.com`;
+        try {
+            // 1. Check if a profile already exists for this UID (case-insensitive)
+            const { data: existingProfile } = await supabase
+                .from('profiles')
+                .select('email, id')
+                .ilike('uid', uid.trim())
+                .single();
 
-        const { data, error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-                data: { name, uid }
+            // If profile exists, use its email. Otherwise use a generated one.
+            const email = existingProfile?.email || `${uid.trim()}@gchat.com`;
+
+            // 2. Auth Sign Up
+            const { data, error } = await supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    data: { name: name || uid, uid }
+                }
+            });
+
+            if (error) return { success: false, message: error.message };
+
+            // 3. Link Profile (if it didn't exist)
+            if (!existingProfile) {
+                const { error: profileError } = await supabase
+                    .from('profiles')
+                    .insert([{ id: data.user.id, uid, name, email }]);
+
+                if (profileError) throw profileError;
+            } else if (!existingProfile.id) {
+                // If profile existed but wasn't linked to a UUID yet
+                await supabase
+                    .from('profiles')
+                    .update({ id: data.user.id })
+                    .eq('email', email);
             }
-        });
 
-        if (error) return { success: false, message: error.message };
-
-        // Profile is automatically created by the trigger if we set it up,
-        // otherwise we manually insert it here.
-        const { error: profileError } = await supabase
-            .from('profiles')
-            .insert([
-                { id: data.user.id, uid, name, email }
-            ]);
-
-        if (profileError) console.error('Profile creation error:', profileError.message);
-
-        return { success: true };
+            return { success: true };
+        } catch (err) {
+            console.error('Signup error:', err);
+            return { success: false, message: err.message || 'Signup failed' };
+        }
     };
 
     const logout = async () => {
