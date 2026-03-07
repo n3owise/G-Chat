@@ -92,7 +92,7 @@ export const AuthProvider = ({ children }) => {
                 .single();
 
             // If profile exists, use its email. Otherwise use a generated one.
-            const email = existingProfile?.email || `${uid.trim()}@gchat.com`;
+            const email = existingProfile?.email || `${uid.trim()}@test.com`;
 
             // 2. Auth Sign Up
             const { data, error } = await supabase.auth.signUp({
