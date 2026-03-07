@@ -57,11 +57,11 @@ export const AuthProvider = ({ children }) => {
 
     const login = async (uid, password) => {
         try {
-            // 1. Resolve UID to Email from profiles table
+            // 1. Resolve UID to Email from profiles table (case-insensitive)
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
-                .select('email')
-                .eq('uid', uid.trim())
+                .select('email, id')
+                .ilike('uid', uid.trim())
                 .single();
 
             if (profileError || !profile?.email) {
@@ -77,7 +77,8 @@ export const AuthProvider = ({ children }) => {
             if (error) return { success: false, message: error.message };
             return { success: true };
         } catch (err) {
-            return { success: false, message: 'An unexpected error occurred' };
+            console.error('Login error:', err);
+            return { success: false, message: err.message || 'An unexpected error occurred' };
         }
     };
 
