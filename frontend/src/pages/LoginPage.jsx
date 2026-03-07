@@ -43,7 +43,7 @@ const LoginPage = () => {
             }
         } catch (err) {
             console.error('UID check error:', err);
-            setError('Error checking User ID. Please try again.');
+            setError(err.message || 'Error checking User ID. Please try again.');
         } finally {
             setLoading(false);
         }
